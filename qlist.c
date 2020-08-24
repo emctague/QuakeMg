@@ -14,8 +14,9 @@
 
 int main() {
 
-  int num_entries;
-  struct qlist_entry *entries = qlist_resolve("master.ioquake3.org:27950", &num_entries);
+  struct qlist_entry *entries = NULL;
+  int num_entries = 0;
+  qlist_resolve("master.ioquake3.org:27950", &entries, &num_entries);
 
   for (int i = 0; i < num_entries; i++) {
     printf("%u.%u.%u.%u:%u\n", entries[i].ip[0], entries[i].ip[1], entries[i].ip[2], entries[i].ip[3], entries[i].port);
@@ -24,16 +25,13 @@ int main() {
 }
 
 
-struct qlist_entry *qlist_resolve(const char *host, int *out_num_entries) {
+void qlist_resolve(const char *host, struct qlist_entry **out_entries, int *out_num_entries) {
   udp_t conn = resolve(host);
   
   udp_out(&conn, "\xFF\xFF\xFF\xFFgetservers 68", 0);
 
   char buf[MAX_PACKET];
   int done = 0;
-
-  struct qlist_entry *entries = NULL;
-  int num_entries = 0;
 
   /* Iterate as multiple response packets may be sent. */
   while (!done) {
@@ -46,9 +44,7 @@ struct qlist_entry *qlist_resolve(const char *host, int *out_num_entries) {
     if (strncmp(buf, expect, strlen(expect))) {
       fprintf(stderr, "Error: Unexpected response to getservers request\n");
       udp_close(&conn);
-      free(entries);
-      *out_num_entries = 0;
-      return NULL;
+      return;
     }
 
     /* Iterate IPs in response */
@@ -63,15 +59,12 @@ struct qlist_entry *qlist_resolve(const char *host, int *out_num_entries) {
       }
 
       /* Append to entries, including swapping endianness of 16-bit port */
-      entries = realloc(entries, (num_entries + 1) * sizeof(struct qlist_entry));
-      memcpy(&entries[num_entries], entry, sizeof(struct qlist_entry));
-      entries[num_entries].port = __builtin_bswap16(entries[num_entries].port);
-      num_entries++;
+      *out_entries = realloc(*out_entries, (*out_num_entries + 1) * sizeof(struct qlist_entry));
+      memcpy(&(*out_entries)[*out_num_entries], entry, sizeof(struct qlist_entry));
+      (*out_entries)[*out_num_entries].port = __builtin_bswap16((*out_entries)[*out_num_entries].port);
+      (*out_num_entries)++;
     }
   }
 
   udp_close(&conn);
-  *out_num_entries = num_entries;
-
-  return entries;
 }

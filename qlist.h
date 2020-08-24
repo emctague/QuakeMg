@@ -10,5 +10,5 @@ struct __attribute__((packed)) qlist_entry {
 
 /* Resolve a list of quake 3 servers given the master server hostname.
  * out_num_entries is populated with the number of entries. */
-struct qlist_entry *qlist_resolve(const char *host, int *out_num_entries);
+void qlist_resolve(const char *host, struct qlist_entry **out_entries, int *out_num_entries);
 
