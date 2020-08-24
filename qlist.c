@@ -30,35 +30,47 @@ struct qlist_entry *qlist_resolve(const char *host, int *out_num_entries) {
   udp_out(&conn, "\xFF\xFF\xFF\xFFgetservers 68", 0);
 
   char buf[MAX_PACKET];
-  size_t bufSize = udp_in(&conn, buf, MAX_PACKET);
-  udp_close(&conn);
-
-  char *expect = "\xFF\xFF\xFF\xFFgetserversResponse\\";
-  if (strncmp(buf, expect, strlen(expect))) {
-    fprintf(stderr, "Error: Unexpected response to getservers request\n");
-    return NULL;
-  }
-
+  int done = 0;
 
   struct qlist_entry *entries = NULL;
   int num_entries = 0;
 
+  /* Iterate as multiple response packets may be sent. */
+  while (!done) {
 
-  int base = strlen(expect);
-  for (int i = base; i < bufSize; i += sizeof(struct qlist_entry)) {
-    struct qlist_entry *entry = &buf[i];
+    /* Read response packet */
+    size_t bufSize = udp_in(&conn, buf, MAX_PACKET);
 
-    if (!strncmp(&entry->ip[0], "EOT", 3)) {
-      break;
+    /* Validate response introduction string */
+    char *expect = "\xFF\xFF\xFF\xFFgetserversResponse\\";
+    if (strncmp(buf, expect, strlen(expect))) {
+      fprintf(stderr, "Error: Unexpected response to getservers request\n");
+      udp_close(&conn);
+      free(entries);
+      *out_num_entries = 0;
+      return NULL;
     }
 
-    entries = realloc(entries, (num_entries + 1) * sizeof(struct qlist_entry));
-    memcpy(&entries[num_entries], entry, sizeof(struct qlist_entry));
+    /* Iterate IPs in response */
+    int base = strlen(expect);
+    for (size_t i = base; i < bufSize; i += sizeof(struct qlist_entry)) {
+      struct qlist_entry *entry = (struct qlist_entry*)&buf[i];
 
-    entries[num_entries].port = __builtin_bswap16(entries[num_entries].port);
-    num_entries++;
+      /* Response end-case is an IP which looks like "EOT\0" when handled as chars */
+      if (!strncmp((char*)&entry->ip[0], "EOT", 3)) {
+        done = 1;
+        break;
+      }
+
+      /* Append to entries, including swapping endianness of 16-bit port */
+      entries = realloc(entries, (num_entries + 1) * sizeof(struct qlist_entry));
+      memcpy(&entries[num_entries], entry, sizeof(struct qlist_entry));
+      entries[num_entries].port = __builtin_bswap16(entries[num_entries].port);
+      num_entries++;
+    }
   }
 
+  udp_close(&conn);
   *out_num_entries = num_entries;
 
   return entries;
