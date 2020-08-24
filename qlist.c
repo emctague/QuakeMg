@@ -7,87 +7,59 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netdb.h>
+#include "udp.h"
+#include "qlist.h"
 
 #define MAX_PACKET 4096
 
-
-typedef struct {
-  struct sockaddr_in sendAddr, recvAddr;
-  socklen_t recvAddrLen;
-  int socket;
-} udp_t;
-
-udp_t resolve(const char *fullAddr);
-void udp_out(udp_t *udp, char *data, size_t len);
-size_t udp_in(udp_t *udp, char *buf, size_t max);
-void udp_close(udp_t *udp);
-
 int main() {
 
-  udp_t conn = resolve("master.ioquake3.org:27950");
+  int num_entries;
+  struct qlist_entry *entries = qlist_resolve("master.ioquake3.org:27950", &num_entries);
 
-  char *data = "\xFF\xFF\xFF\xFFgetservers 68 ffa\x0A";
-  udp_out(&conn, data, strlen(data));
+  for (int i = 0; i < num_entries; i++) {
+    printf("%u.%u.%u.%u:%u\n", entries[i].ip[0], entries[i].ip[1], entries[i].ip[2], entries[i].ip[3], entries[i].port);
+  }
+  free(entries);
+}
+
+
+struct qlist_entry *qlist_resolve(const char *host, int *out_num_entries) {
+  udp_t conn = resolve(host);
+  
+  udp_out(&conn, "\xFF\xFF\xFF\xFFgetservers 68", 0);
 
   char buf[MAX_PACKET];
-  size_t n = udp_in(&conn, buf, MAX_PACKET);
+  size_t bufSize = udp_in(&conn, buf, MAX_PACKET);
+  udp_close(&conn);
 
   char *expect = "\xFF\xFF\xFF\xFFgetserversResponse\\";
   if (strncmp(buf, expect, strlen(expect))) {
     fprintf(stderr, "Error: Unexpected response to getservers request\n");
-    exit(3);
+    return NULL;
   }
 
-  int offset = strlen(expect);
 
-  printf("Server: %s\n", buf);
-  udp_close(&conn);
-}
+  struct qlist_entry *entries = NULL;
+  int num_entries = 0;
 
 
-udp_t resolve(const char *fullAddr) {
-  char *fullCopy = strdup(fullAddr);
-  char *host = strtok(fullCopy, ":");
-  char *port = strtok(NULL, "\0");
-  struct addrinfo hints = { .ai_family = AF_INET, .ai_socktype = SOCK_DGRAM, .ai_flags = AI_NUMERICSERV };
-  struct addrinfo *addrs;
-  udp_t output = {};
+  int base = strlen(expect);
+  for (int i = base; i < bufSize; i += sizeof(struct qlist_entry)) {
+    struct qlist_entry *entry = &buf[i];
 
-  if (getaddrinfo(host, port, &hints, &addrs) != 0) {
-    perror("Cannot resolve address.");
-    exit(1);
+    if (!strncmp(&entry->ip[0], "EOT", 3)) {
+      break;
+    }
+
+    entries = realloc(entries, (num_entries + 1) * sizeof(struct qlist_entry));
+    memcpy(&entries[num_entries], entry, sizeof(struct qlist_entry));
+
+    entries[num_entries].port = __builtin_bswap16(entries[num_entries].port);
+    num_entries++;
   }
 
-  memcpy(&output.sendAddr, addrs->ai_addr, addrs->ai_addrlen);
-  freeaddrinfo(addrs);
-  free(fullCopy);
+  *out_num_entries = num_entries;
 
-  output.recvAddr = output.sendAddr;
-  output.recvAddr.sin_addr.s_addr = INADDR_ANY;
-  output.recvAddrLen = sizeof(output.recvAddr);
-
-  output.socket = socket(AF_INET, SOCK_DGRAM, 0);
-
-  if (output.socket < 0) { 
-    perror("SOCK CREATION FUCKED");
-    exit(2);
-  }
-
-  return output;
-}
-
-
-void udp_out(udp_t *udp, char *data, size_t len) {
-  sendto(udp->socket, data, len, 0, (const struct sockaddr*)&udp->sendAddr, sizeof(udp->sendAddr));
-}
-
-size_t udp_in(udp_t *udp, char *buf, size_t max) {
-  size_t n = recvfrom(udp->socket, buf, max, 0, (struct sockaddr*)&udp->recvAddr, &udp->recvAddrLen);
-  buf[n] = '\0';
-
-  return n;
-}
-
-void udp_close(udp_t *udp) {
-  close(udp->socket);
+  return entries;
 }
