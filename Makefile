@@ -1,5 +1,5 @@
 CC=gcc
-OBJECTS=qlist.o udp.o
+OBJECTS=qlist.o udp.o qinfo.o main.o
 TARGET=quakemg
 CFLAGS=
 LFLAGS=

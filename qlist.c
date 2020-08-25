@@ -12,18 +12,6 @@
 
 #define MAX_PACKET 4096
 
-int main() {
-
-  struct qlist_entry *entries = NULL;
-  int num_entries = 0;
-  qlist_resolve("master.ioquake3.org:27950", &entries, &num_entries);
-
-  for (int i = 0; i < num_entries; i++) {
-    printf("%u.%u.%u.%u:%u\n", entries[i].ip[0], entries[i].ip[1], entries[i].ip[2], entries[i].ip[3], entries[i].port);
-  }
-  free(entries);
-}
-
 
 void qlist_resolve(const char *host, struct qlist_entry **out_entries, int *out_num_entries) {
   udp_t conn = resolve(host);
